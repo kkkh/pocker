@@ -1,4 +1,5 @@
 import {APP_CONFIG} from '@/config/version';
+import BeianInfo from '@/components/BeianInfo';
 
 export default function Footer() {
     return (
@@ -18,6 +19,7 @@ export default function Footer() {
                 <p className="text-sm italic text-gray-500 dark:text-gray-400 mt-1">
                     {APP_CONFIG.description}
                 </p>
+                <BeianInfo/>
             </div>
         </footer>
     );
