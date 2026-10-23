@@ -1,152 +1,152 @@
 name: Upstream Sync
 
-permissions: 
-contents: write 
-issues: write
+permissions:
+  contents: write
+  issues: write
 
-on: 
-schedule: 
-- cron: '0 */6 * * *' # every 6 hours 
-workflow_dispatch:
+on:
+  schedule:
+    - cron: '0 */6 * * *' # every 6 hours
+  workflow_dispatch:
 
-concurrency: 
-group: upstream-sync 
-cancel-in-progress: false
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
 
-jobs: 
-sync_latest_from_upstream: 
-name: Sync latest commits from upstream repo 
-runs-on: ubuntu-latest 
-timeout-minutes: 15
+jobs:
+  sync_latest_from_upstream:
+    name: Sync latest commits from upstream repo
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
-steps:
-  - name: Check for self-reference
-    id: self_check
-    run: |
-      UPSTREAM_REPO="scoful/pocker"
-      CURRENT_REPO="${{ github.repository }}"
-      if [ "$UPSTREAM_REPO" = "$CURRENT_REPO" ]; then
-        echo "Self-reference detected: upstream ($UPSTREAM_REPO) matches current repository ($CURRENT_REPO). Aborting workflow."
-        echo "abort=true" >> $GITHUB_OUTPUT
-      else
-        echo "No self-reference detected."
-        echo "abort=false" >> $GITHUB_OUTPUT
-      fi
+    steps:
+      - name: Check for self-reference
+        id: self_check
+        run: |
+          UPSTREAM_REPO="scoful/pocker"
+          CURRENT_REPO="${{ github.repository }}"
+          if [ "$UPSTREAM_REPO" = "$CURRENT_REPO" ]; then
+            echo "Self-reference detected: upstream ($UPSTREAM_REPO) matches current repository ($CURRENT_REPO). Aborting workflow."
+            echo "abort=true" >> $GITHUB_OUTPUT
+          else
+            echo "No self-reference detected."
+            echo "abort=false" >> $GITHUB_OUTPUT
+          fi
 
-  - uses: actions/checkout@v7
-    if: steps.self_check.outputs.abort == 'false'
-    with:
-      token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v7
+        if: steps.self_check.outputs.abort == 'false'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-  - name: Set up Git
-    if: steps.self_check.outputs.abort == 'false'
-    run: |
-      git config --global user.name "GitHub Action"
-      git config --global user.email "action@github.com"
+      - name: Set up Git
+        if: steps.self_check.outputs.abort == 'false'
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
 
-  - name: Check if sync is needed
-    if: steps.self_check.outputs.abort == 'false'
-    id: check
-    run: |
-      git clone --depth 1 https://github.com/scoful/pocker.git temp
+      - name: Check if sync is needed
+        if: steps.self_check.outputs.abort == 'false'
+        id: check
+        run: |
+          git clone --depth 1 https://github.com/scoful/pocker.git temp
 
-      if [ -f temp/src/config/version.js ]; then
-        UPSTREAM_HASH=$(sha256sum temp/src/config/version.js | awk '{print $1}')
-      else
-        echo "Warning: src/config/version.js not found in upstream. Assuming no sync needed."
-        UPSTREAM_HASH=""
-      fi
+          if [ -f temp/src/config/version.js ]; then
+            UPSTREAM_HASH=$(sha256sum temp/src/config/version.js | awk '{print $1}')
+          else
+            echo "Warning: src/config/version.js not found in upstream. Assuming no sync needed."
+            UPSTREAM_HASH=""
+          fi
 
-      if [ -f src/config/version.js ]; then
-        LOCAL_HASH=$(sha256sum src/config/version.js | awk '{print $1}')
-      else
-        echo "Warning: src/config/version.js not found locally. Triggering sync."
-        LOCAL_HASH=""
-      fi
+          if [ -f src/config/version.js ]; then
+            LOCAL_HASH=$(sha256sum src/config/version.js | awk '{print $1}')
+          else
+            echo "Warning: src/config/version.js not found locally. Triggering sync."
+            LOCAL_HASH=""
+          fi
 
-      if [ "$UPSTREAM_HASH" = "$LOCAL_HASH" ] && [ -n "$UPSTREAM_HASH" ]; then
-        echo "No sync needed, src/config/version.js contents match."
-        echo "needs_sync=false" >> $GITHUB_OUTPUT
-      else
-        echo "Sync needed, src/config/version.js differs (upstream=$UPSTREAM_HASH, local=$LOCAL_HASH)."
-        echo "needs_sync=true" >> $GITHUB_OUTPUT
-      fi
+          if [ "$UPSTREAM_HASH" = "$LOCAL_HASH" ] && [ -n "$UPSTREAM_HASH" ]; then
+            echo "No sync needed, src/config/version.js contents match."
+            echo "needs_sync=false" >> $GITHUB_OUTPUT
+          else
+            echo "Sync needed, src/config/version.js differs (upstream=$UPSTREAM_HASH, local=$LOCAL_HASH)."
+            echo "needs_sync=true" >> $GITHUB_OUTPUT
+          fi
 
-      rm -rf temp
+          rm -rf temp
 
-  - name: Sync upstream changes
-    if: steps.self_check.outputs.abort == 'false' && steps.check.outputs.needs_sync == 'true'
-    id: sync
-    run: |
-      # 1) 备份本地 .github/workflows 全部文件（含本工作流），防止被上游覆盖
-      if [ ! -d .github/workflows ] || [ -z "$(ls -A .github/workflows)" ]; then
-        echo "::error::.github/workflows 为空，拒绝同步以避免丢失本工作流文件"
-        exit 1
-      fi
-      rm -rf /tmp/wf-backup && mkdir -p /tmp/wf-backup
-      cp -a .github/workflows/. /tmp/wf-backup/
+      - name: Sync upstream changes
+        if: steps.self_check.outputs.abort == 'false' && steps.check.outputs.needs_sync == 'true'
+        id: sync
+        run: |
+          # 1) 备份本地 .github/workflows 全部文件（含本工作流），防止被上游覆盖
+          if [ ! -d .github/workflows ] || [ -z "$(ls -A .github/workflows)" ]; then
+            echo "::error::.github/workflows 为空，拒绝同步以避免丢失本工作流文件"
+            exit 1
+          fi
+          rm -rf /tmp/wf-backup && mkdir -p /tmp/wf-backup
+          cp -a .github/workflows/. /tmp/wf-backup/
 
-      # 2) 清空工作区（保留 .git），整体替换为上游内容
-      find . -maxdepth 1 -not -path './.git' -not -path . -exec rm -rf {} \;
-      git clone --depth 1 https://github.com/scoful/pocker.git temp
-      rsync -av --exclude='.git' --exclude='.github/workflows' temp/ .
-      rm -rf temp
+          # 2) 清空工作区（保留 .git），整体替换为上游内容
+          find . -maxdepth 1 -not -path './.git' -not -path . -exec rm -rf {} \;
+          git clone --depth 1 https://github.com/scoful/pocker.git temp
+          rsync -av --exclude='.git' --exclude='.github/workflows' temp/ .
+          rm -rf temp
 
-      # 3) 还原本地工作流
-      mkdir -p .github/workflows
-      cp -a /tmp/wf-backup/. .github/workflows/
-      rm -rf /tmp/wf-backup
+          # 3) 还原本地工作流
+          mkdir -p .github/workflows
+          cp -a /tmp/wf-backup/. .github/workflows/
+          rm -rf /tmp/wf-backup
 
-      # 4) 提交并推送到当前默认分支（master 或 main 都能用）
-      TARGET_BRANCH="${GITHUB_REF_NAME}"
-      git add -A
-      git commit -m "Sync with scoful/pocker" || echo "Nothing to commit."
+          # 4) 提交并推送到当前默认分支（master 或 main 都能用）
+          TARGET_BRANCH="${GITHUB_REF_NAME}"
+          git add -A
+          git commit -m "Sync with scoful/pocker" || echo "Nothing to commit."
 
-      if ! PUSH_LOG=$(git push origin "HEAD:${TARGET_BRANCH}" 2>&1); then
-        echo "Push to ${TARGET_BRANCH} failed."
-        {
-          echo "error_logs<<POCKER_SYNC_EOF"
-          printf '%s\n' "$PUSH_LOG"
-          echo "POCKER_SYNC_EOF"
-        } >> "$GITHUB_OUTPUT"
-        exit 1
-      fi
+          if ! PUSH_LOG=$(git push origin "HEAD:${TARGET_BRANCH}" 2>&1); then
+            echo "Push to ${TARGET_BRANCH} failed."
+            {
+              echo "error_logs<<POCKER_SYNC_EOF"
+              printf '%s\n' "$PUSH_LOG"
+              echo "POCKER_SYNC_EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
-      echo "::notice::Synced and pushed to branch ${TARGET_BRANCH}"
+          echo "::notice::Synced and pushed to branch ${TARGET_BRANCH}"
 
-  - name: Clean issue notice
-    if: steps.self_check.outputs.abort == 'false' && steps.check.outputs.needs_sync == 'true' && success()
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
-    run: |
-      gh label create "🚨 Sync Fail" --color D73A4A --description "Upstream sync failure" --force >/dev/null 2>&1 || true
-      NUMS=$(gh issue list --state open --label "🚨 Sync Fail" --limit 100 --json number --jq '.[].number' || true)
-      for n in $NUMS; do
-        gh issue close "$n" --comment "Upstream sync succeeded, closing." >/dev/null 2>&1 || true
-      done
+      - name: Clean issue notice
+        if: steps.self_check.outputs.abort == 'false' && steps.check.outputs.needs_sync == 'true' && success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh label create "🚨 Sync Fail" --color D73A4A --description "Upstream sync failure" --force >/dev/null 2>&1 || true
+          NUMS=$(gh issue list --state open --label "🚨 Sync Fail" --limit 100 --json number --jq '.[].number' || true)
+          for n in $NUMS; do
+            gh issue close "$n" --comment "Upstream sync succeeded, closing." >/dev/null 2>&1 || true
+          done
 
-  - name: Sync check
-    if: steps.self_check.outputs.abort == 'false' && steps.check.outputs.needs_sync == 'true' && failure()
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
-      ERROR_LOGS: ${{ steps.sync.outputs.error_logs || 'No detailed logs captured.' }}
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    run: |
-      gh label create "🚨 Sync Fail" --color D73A4A --description "Upstream sync failure" --force >/dev/null 2>&1 || true
+      - name: Sync check
+        if: steps.self_check.outputs.abort == 'false' && steps.check.outputs.needs_sync == 'true' && failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ERROR_LOGS: ${{ steps.sync.outputs.error_logs || 'No detailed logs captured.' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create "🚨 Sync Fail" --color D73A4A --description "Upstream sync failure" --force >/dev/null 2>&1 || true
 
-      {
-        printf 'Failed to sync with upstream repository [pocker](https://github.com/scoful/pocker).\n\n'
-        printf '无法与上游仓库同步。请查看下面的错误日志，并根据需要手动同步。\n\n'
-        printf '**Error Logs:**\n\n```\n%s\n```\n\n' "$ERROR_LOGS"
-        printf 'Run: %s\n' "$RUN_URL"
-      } > /tmp/sync-fail.md
+          {
+            printf 'Failed to sync with upstream repository [pocker](https://github.com/scoful/pocker).\n\n'
+            printf '无法与上游仓库同步。请查看下面的错误日志，并根据需要手动同步。\n\n'
+            printf '**Error Logs:**\n\n```\n%s\n```\n\n' "$ERROR_LOGS"
+            printf 'Run: %s\n' "$RUN_URL"
+          } > /tmp/sync-fail.md
 
-      # 已有未关闭的同名 issue 就只追加评论，避免每 6 小时刷一个
-      EXISTING=$(gh issue list --state open --label "🚨 Sync Fail" --limit 1 --json number --jq '.[0].number // empty' || true)
-      if [ -n "$EXISTING" ]; then
-        gh issue comment "$EXISTING" --body-file /tmp/sync-fail.md || true
-      else
-        gh issue create --title "🚨 同步失败 | Sync Fail" --label "🚨 Sync Fail" --body-file /tmp/sync-fail.md || true
-      fi
+          # 已有未关闭的同名 issue 就只追加评论，避免每 6 小时刷一个
+          EXISTING=$(gh issue list --state open --label "🚨 Sync Fail" --limit 1 --json number --jq '.[0].number // empty' || true)
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body-file /tmp/sync-fail.md || true
+          else
+            gh issue create --title "🚨 同步失败 | Sync Fail" --label "🚨 Sync Fail" --body-file /tmp/sync-fail.md || true
+          fi
